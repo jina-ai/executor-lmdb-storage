@@ -3,11 +3,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from jina import Document, DocumentArray, Executor, Flow
+from docarray import Document, DocumentArray
+from jina import Executor, Flow
 from jina.logging.profile import TimeContext
-from jina_commons.indexers.dump import import_metas, import_vectors
 
-from ..lmdb_storage import LMDBStorage
+from executor.commons import import_metas, import_vectors
+from executor.lmdb_storage import LMDBStorage
 
 np.random.seed(0)
 d_embedding = np.array([1, 1, 1, 1, 1, 1, 1])
@@ -18,7 +19,7 @@ def get_documents(nr=10, index_start=0, emb_size=7, text='hello world'):
     docs = []
     for i in range(index_start, nr + index_start):
         d = Document()
-        d.id = i
+        d.id = f'aa{i}'  # to test it supports non-int ids
         d.text = f'{text} {i}'
         d.embedding = np.random.random(emb_size)
         d.tags['field'] = f'tag data {i}'
@@ -34,7 +35,7 @@ def test_config():
 def test_lmdb_crud(tmpdir, nr_docs=10):
     docs = get_documents(nr=nr_docs)
 
-    metas = {'workspace': str(tmpdir), 'name': 'storage', 'pea_id': 0}
+    metas = {'workspace': str(tmpdir), 'name': 'storage'}
 
     # indexing
     indexer = LMDBStorage(map_size=10485760 * 1000, metas=metas)
@@ -71,7 +72,7 @@ def test_lmdb_crud(tmpdir, nr_docs=10):
 
 def test_lmdb_crud_flow(tmpdir):
     metas = {'workspace': str(tmpdir), 'name': 'storage'}
-    runtime_args = {'pea_id': 0, 'replica_id': None}
+    runtime_args = {'shard_id': 0}
 
     def _get_flow() -> Flow:
         return Flow().add(
@@ -90,15 +91,15 @@ def test_lmdb_crud_flow(tmpdir):
         f.index(
             inputs=docs,
             parameters={
-                'storage': {'traversal_paths': ['r']},
+                'storage': {'traversal_paths': '@r'},
             },
         )
 
     # getting size
     with LMDBStorage(metas=metas, runtime_args=runtime_args) as indexer:
-        items = indexer.size
+        item_count = indexer.size
 
-    assert items == len(docs)
+    assert item_count == len(docs)
 
     # updating
     with _get_flow() as f:
@@ -106,18 +107,20 @@ def test_lmdb_crud_flow(tmpdir):
             on='/update',
             inputs=update_docs,
             parameters={
-                'storage': {'traversal_paths': ['r']},
+                'storage': {'traversal_paths': '@r'},
             },
         )
 
     # asserting...
     with LMDBStorage(metas=metas, runtime_args=runtime_args) as indexer:
-        assert indexer.size == items
+        assert indexer.size == item_count
 
 
 def _in_docker():
-    return False
     """Returns: True if running in a Docker container, else False"""
+    if not os.path.exists("/proc/1/cgroup"):
+        return False
+
     with open('/proc/1/cgroup', 'rt') as ifh:
         if 'docker' in ifh.read():
             print('in docker, skipping benchmark')
@@ -139,8 +142,8 @@ def test_lmdb_bm(tmpdir):
 
 def _doc_without_embedding(d: Document):
     new_doc = Document(d, copy=True)
-    new_doc.ClearField('embedding')
-    return new_doc.SerializeToString()
+    new_doc.pop('embedding')
+    return new_doc.to_bytes()
 
 
 def _assert_dump_data(dump_path, docs, shards, pea_id):
@@ -201,7 +204,7 @@ def test_dump(tmpdir, shards):
 
 
 def test_return_embeddings(tmpdir):
-    metas = {'workspace': str(tmpdir), 'name': 'storage', 'pea_id': 0}
+    metas = {'workspace': str(tmpdir), 'name': 'storage'}
     indexer = LMDBStorage(metas=metas)
     doc = Document(embedding=np.random.rand(1, 10))
     da = DocumentArray([doc])
