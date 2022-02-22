@@ -1,10 +1,12 @@
 import os
-from typing import Dict, List
+from typing import Dict
 
 import lmdb
-from jina import Document, DocumentArray, Executor, requests
-from jina_commons import get_logger
-from jina_commons.indexers.dump import export_dump_streaming, import_metas
+from docarray import Document, DocumentArray
+from jina import Executor, requests
+from jina.logging.logger import JinaLogger
+
+from .commons import export_dump_streaming, import_metas
 
 
 class _LMDBHandler:
@@ -52,7 +54,7 @@ class LMDBStorage(Executor):
     def __init__(
         self,
         map_size: int = 1048576000,  # in bytes, 1000 MB
-        default_traversal_paths: List[str] = ['r'],
+        default_traversal_paths: str = '@r',
         dump_path: str = None,
         default_return_embeddings: bool = True,
         *args,
@@ -67,10 +69,11 @@ class LMDBStorage(Executor):
         super().__init__(*args, **kwargs)
         self.map_size = map_size
         self.default_traversal_paths = default_traversal_paths
+
         self.file = os.path.join(self.workspace, 'db.lmdb')
         if not os.path.exists(self.workspace):
             os.makedirs(self.workspace)
-        self.logger = get_logger(self)
+        self.logger = JinaLogger(self.metas.name)
 
         self.dump_path = dump_path or kwargs.get('runtime_args', {}).get(
             'dump_path', None
@@ -83,7 +86,7 @@ class LMDBStorage(Executor):
                 serialized_doc = Document(meta)
                 serialized_doc.id = id
                 da.append(serialized_doc)
-            self.index(da, parameters={'traversal_paths': ['r']})
+            self.index(da, parameters={'traversal_paths': '@r'})
         self.default_return_embeddings = default_return_embeddings
 
     def _handler(self):
@@ -106,8 +109,8 @@ class LMDBStorage(Executor):
             return
         with self._handler() as env:
             with env.begin(write=True) as transaction:
-                for d in docs.traverse_flat(traversal_paths):
-                    transaction.put(d.id.encode(), d.SerializeToString())
+                for d in docs[traversal_paths]:
+                    transaction.put(d.id.encode(), d.to_bytes())
 
     @requests(on='/update')
     def update(self, docs: DocumentArray, parameters: Dict, **kwargs):
@@ -123,12 +126,12 @@ class LMDBStorage(Executor):
             return
         with self._handler() as env:
             with env.begin(write=True) as transaction:
-                for d in docs.traverse_flat(traversal_paths):
+                for d in docs[traversal_paths]:
                     # TODO figure out if there is a better way to do update in LMDB
                     # issue: the defacto update method is an upsert (if a value didn't exist, it is created)
                     # see https://lmdb.readthedocs.io/en/release/#lmdb.Cursor.replace
                     if transaction.delete(d.id.encode()):
-                        transaction.replace(d.id.encode(), d.SerializeToString())
+                        transaction.replace(d.id.encode(), d.to_bytes())
 
     @requests(on='/delete')
     def delete(self, docs: DocumentArray, parameters: Dict, **kwargs):
@@ -144,7 +147,7 @@ class LMDBStorage(Executor):
             return
         with self._handler() as env:
             with env.begin(write=True) as transaction:
-                for d in docs.traverse_flat(traversal_paths):
+                for d in docs[traversal_paths]:
                     transaction.delete(d.id.encode())
 
     @requests(on='/search')
@@ -162,15 +165,16 @@ class LMDBStorage(Executor):
         )
         if docs is None:
             return
-        docs_to_get = docs.traverse_flat(traversal_paths)
+        docs_to_get = docs[traversal_paths]
         with self._handler() as env:
             with env.begin(write=True) as transaction:
                 for i, d in enumerate(docs_to_get):
                     id = d.id
-                    serialized_doc = Document(transaction.get(d.id.encode()))
+                    serialized_doc = Document.from_bytes(transaction.get(d.id.encode()))
                     if not return_embeddings:
                         serialized_doc.pop('embedding')
-                    d.update(serialized_doc)
+
+                    d._data = serialized_doc._data
                     d.id = id
 
     @requests(on='/dump')
@@ -202,7 +206,6 @@ class LMDBStorage(Executor):
         with self._handler() as env:
             with env.begin(write=True) as transaction:
                 stats = transaction.stat()
-                print(stats)
                 return stats['entries']
 
     def _dump_generator(self):
@@ -213,13 +216,13 @@ class LMDBStorage(Executor):
                 iterator = cursor.iternext(keys=True, values=True)
                 for it in iterator:
                     id, data = it
-                    doc = Document(data)
+                    doc = Document.from_bytes(data)
                     yield id.decode(), doc.embedding, LMDBStorage._doc_without_embedding(
                         doc
-                    ).SerializeToString()
+                    ).to_bytes()
 
     @staticmethod
     def _doc_without_embedding(d):
         new_doc = Document(d, copy=True)
-        new_doc.ClearField('embedding')
+        new_doc.pop('embedding')
         return new_doc
