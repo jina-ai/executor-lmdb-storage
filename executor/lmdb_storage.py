@@ -167,15 +167,17 @@ class LMDBStorage(Executor):
             return
         docs_to_get = docs[traversal_paths]
         with self._handler() as env:
-            with env.begin(write=True) as transaction:
+            with env.begin(write=False) as transaction:
                 for i, d in enumerate(docs_to_get):
-                    id = d.id
+                    scores = d.scores
+                    tags = d.tags
                     serialized_doc = Document.from_bytes(transaction.get(d.id.encode()))
                     if not return_embeddings:
                         serialized_doc.pop('embedding')
-
-                    d._data = serialized_doc._data
-                    d.id = id
+                    # should keep existing tags, scores etc.
+                    d.copy_from(serialized_doc)
+                    d.scores = scores
+                    d.tags.update(tags)
 
     @requests(on='/dump')
     def dump(self, parameters: Dict, **kwargs):
