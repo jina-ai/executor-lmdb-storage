@@ -2,4 +2,4 @@ manifest_version: 1
 name: LMDBStorage
 description: Storage-type indexer powered by the lmdb disk-based storage system
 url: https://github.com/jina-ai/executor-lmdb-storage
-keywords: [storage, crud, indexer, lmdb, 3.0-exclusive]
+keywords: [storage, crud, indexer, lmdb]
