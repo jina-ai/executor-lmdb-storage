@@ -1,6 +1,6 @@
 import os
 from typing import Dict
-
+from warnings import warn
 import lmdb
 from docarray import Document, DocumentArray
 from jina import Executor, requests
@@ -54,7 +54,7 @@ class LMDBStorage(Executor):
     def __init__(
         self,
         map_size: int = 1048576000,  # in bytes, 1000 MB
-        default_traversal_paths: str = '@r',
+        default_access_paths: str = '@r',
         dump_path: str = None,
         default_return_embeddings: bool = True,
         *args,
@@ -63,12 +63,14 @@ class LMDBStorage(Executor):
         """
         :param map_size: the maximal size of teh database. Check more information at
             https://lmdb.readthedocs.io/en/release/#environment-class
-        :param default_traversal_paths: fallback traversal path in case there is not traversal path sent in the request
+        :param default_access_paths: fallback access path in case there is not access path sent in the request
         :param default_return_embeddings: whether to return embeddings on search or not
         """
+        if("default_traversal_paths" in kwargs.keys()):
+            warn("'default_traversal_paths' is deprecated, please use default_access_paths",DeprecationWarning,s)
         super().__init__(*args, **kwargs)
         self.map_size = map_size
-        self.default_traversal_paths = default_traversal_paths
+        self.default_access_paths = default_access_paths
 
         self.file = os.path.join(self.workspace, 'db.lmdb')
         if not os.path.exists(self.workspace):
@@ -86,7 +88,7 @@ class LMDBStorage(Executor):
                 serialized_doc = Document(meta)
                 serialized_doc.id = id
                 da.append(serialized_doc)
-            self.index(da, parameters={'traversal_paths': '@r'})
+            self.index(da, parameters={'access_paths': '@r'})
         self.default_return_embeddings = default_return_embeddings
 
     def _handler(self):
@@ -102,14 +104,14 @@ class LMDBStorage(Executor):
         :param docs: the documents to add
         :param parameters: parameters to the request
         """
-        traversal_paths = parameters.get(
-            'traversal_paths', self.default_traversal_paths
+        access_paths = parameters.get(
+            'access_paths', self.default_access_paths
         )
         if docs is None:
             return
         with self._handler() as env:
             with env.begin(write=True) as transaction:
-                for d in docs[traversal_paths]:
+                for d in docs[access_paths]:
                     transaction.put(d.id.encode(), d.to_bytes())
 
     @requests(on='/update')
@@ -119,14 +121,14 @@ class LMDBStorage(Executor):
         :param docs: the documents to update
         :param parameters: parameters to the request
         """
-        traversal_paths = parameters.get(
-            'traversal_paths', self.default_traversal_paths
+        access_paths = parameters.get(
+            'access_paths', self.default_access_paths
         )
         if docs is None:
             return
         with self._handler() as env:
             with env.begin(write=True) as transaction:
-                for d in docs[traversal_paths]:
+                for d in docs[access_paths]:
                     # TODO figure out if there is a better way to do update in LMDB
                     # issue: the defacto update method is an upsert (if a value didn't exist, it is created)
                     # see https://lmdb.readthedocs.io/en/release/#lmdb.Cursor.replace
@@ -140,14 +142,14 @@ class LMDBStorage(Executor):
         :param docs: the documents to delete
         :param parameters: parameters to the request
         """
-        traversal_paths = parameters.get(
-            'traversal_paths', self.default_traversal_paths
+        access_paths = parameters.get(
+            'access_paths', self.default_access_paths
         )
         if docs is None:
             return
         with self._handler() as env:
             with env.begin(write=True) as transaction:
-                for d in docs[traversal_paths]:
+                for d in docs[access_paths]:
                     transaction.delete(d.id.encode())
 
     @requests(on='/search')
@@ -157,15 +159,15 @@ class LMDBStorage(Executor):
         :param docs: the list of Documents (they only need to contain the ids)
         :param parameters: the parameters for this request
         """
-        traversal_paths = parameters.get(
-            'traversal_paths', self.default_traversal_paths
+        access_paths = parameters.get(
+            'access_paths', self.default_access_paths
         )
         return_embeddings = parameters.get(
             'return_embeddings', self.default_return_embeddings
         )
         if docs is None:
             return
-        docs_to_get = docs[traversal_paths]
+        docs_to_get = docs[access_paths]
         with self._handler() as env:
             with env.begin(write=False) as transaction:
                 for i, d in enumerate(docs_to_get):
