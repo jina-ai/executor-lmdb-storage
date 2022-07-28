@@ -1,5 +1,5 @@
 import os
-from typing import Dict
+from typing import Dict,Optional
 from warnings import warn
 import lmdb
 from docarray import Document, DocumentArray
@@ -55,6 +55,7 @@ class LMDBStorage(Executor):
         self,
         map_size: int = 1048576000,  # in bytes, 1000 MB
         default_access_paths: str = '@r',
+        default_traversal_paths: Optional[str] = None,
         dump_path: str = None,
         default_return_embeddings: bool = True,
         *args,
@@ -63,14 +64,19 @@ class LMDBStorage(Executor):
         """
         :param map_size: the maximal size of teh database. Check more information at
             https://lmdb.readthedocs.io/en/release/#environment-class
-        :param default_access_paths: fallback access path in case there is not access path sent in the request
+        :param default_access_paths: fallback traversal path in case there is not traversal path sent in the request
+        :param default_traversal_paths: please use default_access_paths
         :param default_return_embeddings: whether to return embeddings on search or not
         """
-        if("default_traversal_paths" in kwargs.keys()):
-            warn("'default_traversal_paths' is deprecated, please use default_access_paths",DeprecationWarning,s)
         super().__init__(*args, **kwargs)
         self.map_size = map_size
-        self.default_access_paths = default_access_paths
+        if default_traversal_paths is not None:
+            self.default_access_paths = default_traversal_paths
+            warn("'default_traversal_paths' will be deprecated in the future, please use 'default_access_paths'.",
+                 DeprecationWarning,
+                 stacklevel=2)
+        else:
+            self.default_access_paths = default_access_paths
 
         self.file = os.path.join(self.workspace, 'db.lmdb')
         if not os.path.exists(self.workspace):
