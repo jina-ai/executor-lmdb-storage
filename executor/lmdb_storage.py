@@ -83,7 +83,10 @@ class LMDBStorage(Executor):
             os.makedirs(self.workspace)
         self.logger = JinaLogger(self.metas.name)
 
-        self.dump_path = dump_path or kwargs.get('runtime_args', {}).get(
+        result = kwargs.get('runtime_args', dict())
+        if result is None:
+            result = {}
+        self.dump_path = dump_path or result.get(
             'dump_path', None
         )
         if self.dump_path is not None:
