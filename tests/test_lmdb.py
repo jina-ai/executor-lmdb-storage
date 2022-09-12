@@ -91,7 +91,7 @@ def test_lmdb_crud_flow(tmpdir):
         f.index(
             inputs=docs,
             parameters={
-                'storage': {'traversal_paths': '@r'},
+                'storage': {'access_paths': '@r'},
             },
         )
 
@@ -107,7 +107,7 @@ def test_lmdb_crud_flow(tmpdir):
             on='/update',
             inputs=update_docs,
             parameters={
-                'storage': {'traversal_paths': '@r'},
+                'storage': {'access_paths': '@r'},
             },
         )
 
